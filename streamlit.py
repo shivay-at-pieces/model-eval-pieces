@@ -42,24 +42,69 @@ if upload_file == "Yes":
     files = st.file_uploader("Upload a file", accept_multiple_files=True)
 
 # Function to send request to the /qgpt/question endpoint
-def get_model_response(model_name, model_id, prompt, iterable):
+def get_model_response(model_name, model_id, prompt, files):
+    iterable = []
+ 
+    for file in files:
+        if file.name.split(".")[-1] not in extensions:
+            st.warning(f"File type {file.name.split('.')[-1]} not supported.")
+            files.remove(file) # Remove the file from the list of the files because it is not vaild
+            metadata = None
+        else:
+            metadata = client.FragmentMetadata(ext=file.name.split(".")[-1])
+        try:
+            raw = StringIO(file.getvalue().decode("utf-8"))
+        except:
+            st.warning(f"Error in decoding file {file.name}")
+            files.remove(file) # Remove the file from the list of the files because it is not vaild
+            continue
+        iterable.append(client.RelevantQGPTSeed(
+                seed = client.Seed(
+                    type="SEEDED_ASSET",
+                    asset=client.SeededAsset(
+                        application=opensource_application,
+                        format=client.SeededFormat(
+                        fragment = client.SeededFragment(
+                            string = client.TransferableString(raw = raw.read()),
+                            metadata=metadata,
+                        ),
+                    )))))
+  
+    # relevant = {"iterable": []}
+    # if files:
+    #     relevant = client.QGPTApi(api_client).relevance(
+    #             client.QGPTRelevanceInput(
+    #                     paths=[file.name for file in files],
+    #                     query=prompt,
+    #                     model=model_id,
+    #                     application=opensource_application.id
+    #                 )
+    #         ).relevant
+        
+    # print(iterable)
+
     question = client.QGPTQuestionInput(
         query=prompt,
-        relevant=client.RelevantQGPTSeeds(iterable=iterable) if iterable else {"iterable": []},
+        relevant = client.RelevantQGPTSeeds(iterable = iterable) if iterable else {"iterable": []},
         model=model_id
     )
-
-    question_json = question.to_json()
+  
+    # question_json = question.to_json()
 
     # Send a Prompt request to the /qgpt/question endpoint
-    response = requests.post('http://localhost:1000/qgpt/question', data=question_json)
+    # response = requests.post('http://localhost:1000/qgpt/question', data=question_json)
+
+    # question_output = client.QGPTApi(api_client).question(question)
 
     try:
         # Create an Instance of Question Output 
-        question_output = client.QGPTQuestionOutput(**response.json())
+        question_output = client.QGPTApi(api_client).question(question)
+        # question_output = client.QGPTQuestionOutput(**response.json())
 
         # Getting the answer
         answers = question_output.answers.iterable[0].text
+        # answers = st.markdown(answers)
+
         return {"Model": model_name, "Response": answers}
     except requests.exceptions.JSONDecodeError:
         return {"Model": model_name, "Response": "Failed to decode JSON response"}
@@ -68,37 +113,11 @@ def get_model_response(model_name, model_id, prompt, iterable):
 
 # Create a button for the user to generate a response
 if st.button('Generate'):
+    # get_model_response("gemini", "049c77e4-fcb1-496e-b786-196aa38dec8e", prompt, files=files)
     with st.spinner('Generating response from models...'):
-        iterable = []
-        if files:
-            for file in files:
-                if file.name.split(".")[-1] not in extensions:
-                    st.warning(f"File type {file.name.split('.')[-1]} not supported.")
-                    files.remove(file)  # Remove the file from the list of the files because it is not valid
-                    metadata = None
-                else:
-                    metadata = client.FragmentMetadata(ext=file.name.split(".")[-1])
-                try:
-                    raw = StringIO(file.getvalue().decode("utf-8"))
-                except:
-                    st.warning(f"Error in decoding file {file.name}")
-                    files.remove(file)  # Remove the file from the list of the files because it is not valid
-                    continue
-                iterable.append(client.RelevantQGPTSeed(
-                    seed=client.Seed(
-                        type="SEEDED_ASSET",
-                        asset=client.SeededAsset(
-                            application=opensource_application,
-                            format=client.SeededFormat(
-                                fragment=client.SeededFragment(
-                                    string=client.TransferableString(raw=raw.read()),
-                                    metadata=metadata,
-                                ),
-                            )))))
-
         results = []
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(get_model_response, model_name, model_id, prompt, iterable) for model_name, model_id in models.items()]
+            futures = [executor.submit(get_model_response, model_name, model_id, prompt, files) for model_name, model_id in models.items()]
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
 
